@@ -13,7 +13,7 @@ metadata <- metadata %>%
 counts <- counts %>%
   dplyr::select(- "558L")
 
-Quality_control_plots(counts, metadata)
+#Quality_control_plots(counts, metadata)
 
 design <- Generate_design_matrix(metadata)
 
