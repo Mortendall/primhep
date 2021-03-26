@@ -17,7 +17,7 @@ counts <- counts %>%
 
 design <- Generate_design_matrix(metadata)
 
-ctrsts <- makeContrasts(
+ctrsts <- limma::makeContrasts(
   Liver = HNKO_L - WT_L,
   Cell_susp = HNKO_CS - WT_CS,
   Prim_hep = HNKO_PH - WT_PH,
@@ -31,11 +31,13 @@ ctrsts <- makeContrasts(
 
 all(metadata$Sample == colnames(counts))
 
+#DGE analysis
 group <- as.matrix(metadata$Group)
 RNAseq <- edgeR::DGEList(counts = counts, group = group)
 keep <- edgeR::filterByExpr(RNAseq, design = design, min.count = 20)
 RNAseq <- RNAseq[keep, , keep.lib.sizes = F]
 RNAseq <- edgeR::calcNormFactors(RNAseq)
+counts_norm <- RNAseq$counts
 cpm_matrix <- cpm(RNAseq, log = T)
 key <- clusterProfiler::bitr(rownames(cpm_matrix), fromType = "ENSEMBL", toType = "SYMBOL", OrgDb = "org.Mm.eg.db")
 RNAseq <- edgeR::estimateDisp(RNAseq,design)
@@ -60,6 +62,7 @@ for (i in 1:length(dgeResults_annotated)){
 #write.xlsx(dgeResults_annotated, file = here("data/edgeR.xlsx"), asTable = TRUE)
 
 
+#Make and save a cpm_matrix with annotations
 cpm_matrix_anno <- cpm_matrix
 cpm_matrix_anno <- as.data.frame(cpm_matrix_anno)
 cpm_matrix_anno <- cpm_matrix_anno %>%

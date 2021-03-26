@@ -253,3 +253,132 @@ Generate_design_matrix <- function(metadata){
     stringr::str_remove_all(colnames(design), "\\(|\\)|Group|:")
   return(design)
 }
+
+
+#' camera_reactome
+#'
+#' @param rLst the reactome database downloaded from https://reactome.org/download/current/Ensembl2Reactome.txt
+#' @param organism eg. "Mus musculus"
+#' @param count_matrix a cpm matrix generated through edgeR's "cpm" function
+#' @param design_matrix design matrix generated thriough stats::niodel.matrix
+#' @param contrast_matrix contrast matrix generated with limma::makeContrasts
+#'
+#' @return a sheet with reactome analysis
+
+camera_reactome <- function(rLst, organism, count_matrix, design_matrix, contrast_matrix){
+  rLst <- data.table::as.data.table(rLst, keep.rownames = T)
+  rLst <- rLst %>%
+    dplyr::filter(V6 == organism)
+  reactomeName <- data.table(ID = unique(rLst$V2), TERM = unique(rLst$V4))
+  reactomeList <- tapply(rLst$V1, rLst$V2, list)
+  reactomeList <- Filter(. %>% length %>% is_greater_than(4), reactomeList) # Remove small categories
+  reactomeList <- Filter(. %>% length %>% is_less_than(501), reactomeList) # Remove small categories
+  camera_test <- apply(contrast_matrix, 2, limma::camera, index = reactomeList, y = count_matrix, design = design_matrix)
+  camera_test <- lapply(camera_test, data.table, keep.rownames = T)
+  camera_test <- lapply(camera_test, setnames, old = "rn", new = "ID")
+  camera_test <- lapply(camera_test, extract, !is.na(PValue))
+  camera_test <- lapply(camera_test, extract, reactomeName, on = "ID", nomatch = FALSE)
+  camera_test <- lapply(camera_test, extract, order(PValue, decreasing = FALSE))
+  return(camera_test)
+}
+
+#### Gene Ontology (only BP)
+#' Title
+#'
+#' @param org.database ex Org.Mm.eg.db
+#' @param cpm_matrix a cpm matrix generated through edgeR's "cpm" function
+#' @param design_matrix design matrix generated thriough stats::model.matrix
+#' @param contrast_matrix contrast matrix generated with limma::makeContrasts
+#'
+#' @return a GO analysis
+
+camera_go <- function(org.database, cpm_matrix, design_matrix, contrast_matrix) {
+  keysGO <- AnnotationDbi::keys(GO.db)
+  termGO <- AnnotationDbi::select(GO.db, keys=keysGO, columns=c("TERM", "ONTOLOGY")) %>% data.table
+  termGO <- termGO %>%
+    dplyr::filter(ONTOLOGY == "BP") %>%
+    dplyr::select(-ONTOLOGY)
+  setnames(termGO, "GOID", "ID")
+
+  cyt.go.genes <- as.list(org.Mm.eg.db::org.Mm.egGO2ALLEGS)
+  cyt.go.genes<- cyt.go.genes[names(cyt.go.genes) %in% termGO$ID]
+  cyt.go.genes <- Filter(. %>% length %>% is_greater_than(4), cyt.go.genes) # Remove small categories
+  cyt.go.genes <- Filter(. %>% length %>% is_less_than(501), cyt.go.genes) # Remove large categories
+
+  entrez_matrix <- cpm_matrix
+  conv <- bitr(rownames(entrez_matrix), fromType='ENSEMBL', toType='ENTREZID', OrgDb = org.database) %>%
+    data.table(key = "ENSEMBL")
+  rownames(entrez_matrix) <- conv[rownames(entrez_matrix), ENTREZID, mult = "first"]
+
+  GO_test <- apply(ctrsts, 2, camera, index = cyt.go.genes, y = entrez_matrix, design = design)
+  GO_test <- lapply(GO_test, data.table, keep.rownames = T)
+  GO_test <- lapply(GO_test, setnames, old = "rn", new = "ID")
+  GO_test <- lapply(GO_test, extract, !is.na(PValue))
+  GO_test <- lapply(GO_test, extract, termGO, on = "ID", nomatch = FALSE)
+  GO_test <- lapply(GO_test, extract, order(PValue, decreasing = FALSE))
+  return(GO_test)
+}
+
+#' Gene ontology enrichment analysis of genes generated from a results file
+#'
+#' @param result_list list of data.tables generated from edgeR. Must be data.table and contain a SYMBOL annotation column
+#'
+#' @return a list containing enrichresults for each element in the results file list
+
+goAnalysis <- function(result_list){
+  bg <- result_list[[1]]
+  bg_list <- clusterProfiler::bitr(
+    bg$SYMBOL,
+    fromType = "SYMBOL",
+    toType = "ENTREZID",
+    OrgDb = "org.Mm.eg.db",
+    drop = T
+  )
+
+  goResult_list <- vector(mode = "list", length = length(result_list))
+  for(i in 1:length(result_list)){
+    sig_list<- result_list[[i]] %>%
+      dplyr::filter(FDR<0.05)
+
+    eg <- clusterProfiler::bitr(
+      sig_list$SYMBOL,
+      fromType = "SYMBOL",
+      toType = "ENTREZID",
+      OrgDb = "org.Mm.eg.db",
+      drop = T
+    )
+    goResults <- clusterProfiler::enrichGO(gene = eg$ENTREZID,
+                                           universe = bg_list$ENTREZID,
+                                           OrgDb = org.Mm.eg.db,
+                                           ont = "BP")
+    goResult_list[[i]]<- goResults
+  }
+  for (i in 1:length(goResult_list)){
+    names(goResult_list)[i]<-names(result_list)[i]
+  }
+  return(goResult_list)
+
+}
+
+#' File exporter - exports GOresults as an excel sheet, and prints dotplot and cnet plots
+#'
+#' @param goList a list object containing one or more enrichResults
+#'
+#' @return
+
+printGOterms <- function(goList){
+  goSheets<- vector(mode = "list", length = length(goList))
+  for (i in 1:length(goSheets)){
+    goSheets[[i]] <- goList[[i]]@result
+    names(goSheets)[i]<-names(goList)[i]
+  }
+  openxlsx::write.xlsx(goSheets, file = here("data/NASH_NAFLD_GOterms.xlsx"), asTable = TRUE)
+
+  for (i in 1:length(goList)){
+    dotplot <- enrichplot::dotplot(goList[[i]], title = names(goList)[i])
+    ggplot2::ggsave(dotplot, filename = paste(here("data/figures"),"/dotplot_",names(goList[i]),".png", sep = ""),width = 12, height = 12, units = "cm", scale = 2.5)
+    goList_anno <- clusterProfiler::setReadable(goList[[i]], OrgDb = org.Mm.eg.db, keyType="ENTREZID")
+    cnetplot <- enrichplot::cnetplot(goList_anno, title = names(goList)[i], size = 1)
+    ggplot2::ggsave(cnetplot, filename = paste(here("data/figures"),"/cnetplot_",names(goList[i]),".png", sep = ""),scale = 2.5)
+  }
+}

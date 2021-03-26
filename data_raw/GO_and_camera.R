@@ -11,7 +11,18 @@ edgeR_data <- list(Liver = NA,
     edgeR_data[[i]]<- open.xlsx::read.xlsx(here("data/edgeR.xlsx"),sheet = i)
   }
 
-cpm_data <- read.xlsx(here("data/CPM_matrix.xlsx"),rowNames = T)
 
-go_data <- goAnalysis(edgeR_data)
+cpm_matrix <- readRDS(here("data/cpm_matrix.rds"))
+#rLst <- fread("https://reactome.org/download/current/Ensembl2Reactome.txt", header = FALSE)
+rLst <- openxlsx::read.xlsx("C:/Users/tvb217/Documents/R/tmp/Reactomedatabase.xlsx")
+organism <- "Mus musculus"
+reactome_data <- camera_reactome(rLst = rLst, organism = organism, count_matrix = cpm_matrix, design_matrix = design, contrast_matrix = ctrsts)
+go_data <- camera_go(org.database = "org.Mm.eg.db", cpm_matrix = cpm_matrix, design_matrix = design, contrast_matrix = ctrsts)
+
+#write.xlsx(camera_test, here::here("data/Reactome_data.xlsx"), asTable = TRUE)
+#write.xlsx(GO_test, here::here("data/GO_data.xlsx"), asTable = TRUE)
+
+
+
+go_sig_genes <- goAnalysis(edgeR_data)
 printGOterms(go_data)
