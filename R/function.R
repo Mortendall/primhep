@@ -269,16 +269,16 @@ camera_reactome <- function(rLst, organism, count_matrix, design_matrix, contras
   rLst <- data.table::as.data.table(rLst, keep.rownames = T)
   rLst <- rLst %>%
     dplyr::filter(V6 == organism)
-  reactomeName <- data.table(ID = unique(rLst$V2), TERM = unique(rLst$V4))
+  reactomeName <- data.table::data.table(ID = unique(rLst$V2), TERM = unique(rLst$V4))
   reactomeList <- tapply(rLst$V1, rLst$V2, list)
   reactomeList <- Filter(. %>% length %>% is_greater_than(4), reactomeList) # Remove small categories
   reactomeList <- Filter(. %>% length %>% is_less_than(501), reactomeList) # Remove small categories
   camera_test <- apply(contrast_matrix, 2, limma::camera, index = reactomeList, y = count_matrix, design = design_matrix)
   camera_test <- lapply(camera_test, data.table, keep.rownames = T)
   camera_test <- lapply(camera_test, setnames, old = "rn", new = "ID")
-  camera_test <- lapply(camera_test, extract, !is.na(PValue))
-  camera_test <- lapply(camera_test, extract, reactomeName, on = "ID", nomatch = FALSE)
-  camera_test <- lapply(camera_test, extract, order(PValue, decreasing = FALSE))
+  camera_test <- lapply(camera_test, magrittr::extract, !is.na(PValue))
+  camera_test <- lapply(camera_test, magrittr::extract, reactomeName, on = "ID", nomatch = FALSE)
+  camera_test <- lapply(camera_test, magrittr::extract, order(PValue, decreasing = FALSE))
   return(camera_test)
 }
 
@@ -306,16 +306,22 @@ camera_go <- function(org.database, cpm_matrix, design_matrix, contrast_matrix) 
   cyt.go.genes <- Filter(. %>% length %>% is_less_than(501), cyt.go.genes) # Remove large categories
 
   entrez_matrix <- cpm_matrix
-  conv <- bitr(rownames(entrez_matrix), fromType='ENSEMBL', toType='ENTREZID', OrgDb = org.database) %>%
-    data.table(key = "ENSEMBL")
-  rownames(entrez_matrix) <- conv[rownames(entrez_matrix), ENTREZID, mult = "first"]
+  conv <- clusterProfiler::bitr(rownames(entrez_matrix), fromType='ENSEMBL', toType='ENTREZID', OrgDb = org.db) %>%
+    data.table::data.table(key = "ENSEMBL")
+  entrez_matrix <- as.data.frame(entrez_matrix) %>%
+    dplyr::mutate(Ensembl = rownames(entrez_matrix))
+  entrez_matrix <- dplyr::left_join(entrez_matrix, conv, by = c("Ensembl" = "ENSEMBL"))
+  entrez_matrix <- dplyr::filter(entrez_matrix,!is.na(entrez_matrix$ENTREZID))
+  entrez_matrix <- dplyr::distinct(entrez_matrix, ENTREZID, .keep_all = T)
+  rownames(entrez_matrix)<-entrez_matrix$ENTREZID
+  entrez_matrix <- dplyr::select(entrez_matrix, -c(ENTREZID,Ensembl))
 
   GO_test <- apply(ctrsts, 2, camera, index = cyt.go.genes, y = entrez_matrix, design = design)
   GO_test <- lapply(GO_test, data.table, keep.rownames = T)
   GO_test <- lapply(GO_test, setnames, old = "rn", new = "ID")
-  GO_test <- lapply(GO_test, extract, !is.na(PValue))
-  GO_test <- lapply(GO_test, extract, termGO, on = "ID", nomatch = FALSE)
-  GO_test <- lapply(GO_test, extract, order(PValue, decreasing = FALSE))
+  GO_test <- lapply(GO_test, magrittr::extract, !is.nan(PValue))
+  GO_test <- lapply(GO_test, magrittr::extract, termGO, on = "ID", nomatch = FALSE)
+  GO_test <- lapply(GO_test, magrittr::extract, order(PValue, decreasing = FALSE))
   return(GO_test)
 }
 
