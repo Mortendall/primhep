@@ -36,17 +36,46 @@ ctrsts <- limma::makeContrasts(
 
 
 cpm_matrix <- readRDS(here("data/cpm_matrix.rds"))
+####camera with reactome####
+
 #rLst <- fread("https://reactome.org/download/current/Ensembl2Reactome.txt", header = FALSE)
 rLst <- openxlsx::read.xlsx("C:/Users/tvb217/Documents/R/tmp/Reactomedatabase.xlsx")
-organism <- "Mus musculus"
-reactome_data <- camera_reactome(rLst = rLst, organism = organism, count_matrix = cpm_matrix, design_matrix = design, contrast_matrix = ctrsts)
+rLst <- data.table::as.data.table(rLst, keep.rownames = T)
+rLst <- rLst %>%
+  dplyr::filter(V6 == "Mus musculus")
+reactomeName <- data.table::data.table(ID = unique(rLst$V2), TERM = unique(rLst$V4))
+reactomeList <- tapply(rLst$V1, rLst$V2, list)
+reactomeList <- Filter(. %>% length %>% is_greater_than(4), reactomeList) # Remove small categories
+reactomeList <- Filter(. %>% length %>% is_less_than(501), reactomeList) # Remove small categories
+
+reactome_data <- camera_reactome(reactomeList, reactomeName, count_matrix = cpm_matrix, design_matrix = design, contrast_matrix = ctrsts)
+
+####camera with GO####
 org.db <- "org.Mm.eg.db"
+
+keysGO <- AnnotationDbi::keys(GO.db)
+termGO <- AnnotationDbi::select(GO.db, keys=keysGO, columns=c("TERM", "ONTOLOGY")) %>% data.table
+termGO <- termGO %>%
+  dplyr::filter(ONTOLOGY == "BP") %>%
+  dplyr::select(-ONTOLOGY)
+setnames(termGO, "GOID", "ID")
+
+cyt.go.genes <- as.list(org.Mm.eg.db::org.Mm.egGO2ALLEGS)
+cyt.go.genes<- cyt.go.genes[names(cyt.go.genes) %in% termGO$ID]
+cyt.go.genes <- Filter(. %>% length %>% is_greater_than(4), cyt.go.genes) # Remove small categories
+cyt.go.genes <- Filter(. %>% length %>% is_less_than(501), cyt.go.genes) # Remove large categories
+
 go_data <- camera_go(org.db, cpm_matrix = cpm_matrix, design_matrix = design, contrast_matrix = ctrsts)
 
 #write.xlsx(camera_test, here::here("data/Reactome_data.xlsx"), asTable = TRUE)
 #write.xlsx(GO_test, here::here("data/GO_data.xlsx"), asTable = TRUE)
 
 
-
+####GO on signficant genes####
 go_sig_genes <- goAnalysis(edgeR_data)
-printGOterms(go_data)
+#printGOterms(go_data)
+
+cameraGoAnnotated <- annotateWithGenes(go_data, cyt.go.genes, fromType = 'ENTREZID')
+cameraReactomeAnnotated <- annotateWithGenes(reactome_data, reactomeList, fromType = "ENSEMBL")
+#saveRDS(cameraReactomeAnnotated, here("data/annotatedReactome.rds"))
+#saveRDS(cameraGoAnnotated, here("data/annotatedGO.rds"))

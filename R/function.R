@@ -265,14 +265,7 @@ Generate_design_matrix <- function(metadata){
 #'
 #' @return a sheet with reactome analysis
 
-camera_reactome <- function(rLst, organism, count_matrix, design_matrix, contrast_matrix){
-  rLst <- data.table::as.data.table(rLst, keep.rownames = T)
-  rLst <- rLst %>%
-    dplyr::filter(V6 == organism)
-  reactomeName <- data.table::data.table(ID = unique(rLst$V2), TERM = unique(rLst$V4))
-  reactomeList <- tapply(rLst$V1, rLst$V2, list)
-  reactomeList <- Filter(. %>% length %>% is_greater_than(4), reactomeList) # Remove small categories
-  reactomeList <- Filter(. %>% length %>% is_less_than(501), reactomeList) # Remove small categories
+camera_reactome <- function(reactomeList,reactomeName, count_matrix, design_matrix, contrast_matrix){
   camera_test <- apply(contrast_matrix, 2, limma::camera, index = reactomeList, y = count_matrix, design = design_matrix)
   camera_test <- lapply(camera_test, data.table, keep.rownames = T)
   camera_test <- lapply(camera_test, setnames, old = "rn", new = "ID")
@@ -293,20 +286,9 @@ camera_reactome <- function(rLst, organism, count_matrix, design_matrix, contras
 #' @return a GO analysis
 
 camera_go <- function(org.database, cpm_matrix, design_matrix, contrast_matrix) {
-  keysGO <- AnnotationDbi::keys(GO.db)
-  termGO <- AnnotationDbi::select(GO.db, keys=keysGO, columns=c("TERM", "ONTOLOGY")) %>% data.table
-  termGO <- termGO %>%
-    dplyr::filter(ONTOLOGY == "BP") %>%
-    dplyr::select(-ONTOLOGY)
-  setnames(termGO, "GOID", "ID")
-
-  cyt.go.genes <- as.list(org.Mm.eg.db::org.Mm.egGO2ALLEGS)
-  cyt.go.genes<- cyt.go.genes[names(cyt.go.genes) %in% termGO$ID]
-  cyt.go.genes <- Filter(. %>% length %>% is_greater_than(4), cyt.go.genes) # Remove small categories
-  cyt.go.genes <- Filter(. %>% length %>% is_less_than(501), cyt.go.genes) # Remove large categories
 
   entrez_matrix <- cpm_matrix
-  conv <- clusterProfiler::bitr(rownames(entrez_matrix), fromType='ENSEMBL', toType='ENTREZID', OrgDb = org.db) %>%
+  conv <- clusterProfiler::bitr(rownames(entrez_matrix), fromType='ENSEMBL', toType='ENTREZID', OrgDb = org.database) %>%
     data.table::data.table(key = "ENSEMBL")
   entrez_matrix <- as.data.frame(entrez_matrix) %>%
     dplyr::mutate(Ensembl = rownames(entrez_matrix))
@@ -314,6 +296,7 @@ camera_go <- function(org.database, cpm_matrix, design_matrix, contrast_matrix) 
   entrez_matrix <- dplyr::filter(entrez_matrix,!is.na(entrez_matrix$ENTREZID))
   entrez_matrix <- dplyr::distinct(entrez_matrix, ENTREZID, .keep_all = T)
   rownames(entrez_matrix)<-entrez_matrix$ENTREZID
+
   entrez_matrix <- dplyr::select(entrez_matrix, -c(ENTREZID,Ensembl))
 
   GO_test <- apply(ctrsts, 2, camera, index = cyt.go.genes, y = entrez_matrix, design = design)
@@ -387,4 +370,29 @@ printGOterms <- function(goList){
     cnetplot <- enrichplot::cnetplot(goList_anno, title = names(goList)[i], size = 1)
     ggplot2::ggsave(cnetplot, filename = paste(here("data/figures"),"/cnetplot_",names(goList[i]),".png", sep = ""),scale = 2.5)
   }
+}
+
+#
+#' code from Lars to extract genes
+#'
+#' @param tests
+#' @param termList
+#' @param fromType
+#'
+#' @return
+
+annotateWithGenes <- function(tests, termList, fromType){
+  conv <- bitr(unique(unlist(termList)), fromType = fromType, toType = 'SYMBOL', OrgDb = "org.Mm.eg.db") %>%
+    data.table(key = fromType)
+  pasteSymbols <- function(x) conv[termList[[x]], paste0(SYMBOL, collapse = ", ")]
+  termSymbols <- lapply(names(termList), pasteSymbols) %>% data.table
+  termSymbols[, id:=names(termList)]
+  setnames(termSymbols, c("symbolList", "id"))
+  setkey(termSymbols, id)
+
+  tests <- lapply(tests, copy)
+  for (i in names(tests)){
+    tests[[i]][, genesInTerm:=termSymbols[ID, symbolList]]
+  }
+  tests
 }
