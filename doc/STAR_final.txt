@@ -1,0 +1,15 @@
+#!/bin/bash
+
+ 
+
+cd ~/2021.03.23_RNAseq_prim_hep/raw_data
+
+ 
+
+for i in *R1*.gz; do
+STAR --runThreadN 8 \
+--genomeDir /Data/index/transcriptome/STAR/mm10_vM18/GenomeDir \
+--readFilesCommand gunzip -c \
+--readFilesIn $i ${i/R1/R2} \
+--outFileNamePrefix ~/2021.03.23_RNAseq_prim_hep/results/STAR/${i/fastq.gz/sam}
+done

@@ -1,0 +1,4 @@
+featureCounts -T 8 -s 2 -p\
+> -a /Data/index/transcriptome/STAR/mm10_vM18/gencode.vM18.primary_assembly.annotation.gtf \
+> -o ~/2021.03.23_RNAseq_prim_hep/results/featurecounts.txt \
+>  ~/2021.03.23_RNAseq_prim_hep/results/STAR/*.sam

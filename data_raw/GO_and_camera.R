@@ -8,7 +8,7 @@ edgeR_data <- list(Liver = NA,
                    Liv_vs_PH_KO = NA,
                    CS_vs_PH_KO = NA)
   for (i in 1:9){
-    edgeR_data[[i]]<- open.xlsx::read.xlsx(here("data/edgeR.xlsx"),sheet = i)
+    edgeR_data[[i]]<- openxlsx::read.xlsx(here("data/edgeR.xlsx"),sheet = i)
   }
 
 metadata <- load_metadata("metadata.xlsx")
@@ -75,7 +75,82 @@ go_data <- camera_go(org.db, cpm_matrix = cpm_matrix, design_matrix = design, co
 go_sig_genes <- goAnalysis(edgeR_data)
 #printGOterms(go_data)
 
+for (i in 1:length(go_sig_genes)){
+  go_sig_genes[[i]] <- clusterProfiler::setReadable(go_sig_genes[[i]], OrgDb = org.Mm.eg.db, keyType="ENTREZID")
+}
+#saveRDS(go_sig_genes, file = here::here("data/go_sig.data.rds"))
+
+#####annotate GO data#####
 cameraGoAnnotated <- annotateWithGenes(go_data, cyt.go.genes, fromType = 'ENTREZID')
 cameraReactomeAnnotated <- annotateWithGenes(reactome_data, reactomeList, fromType = "ENSEMBL")
 #saveRDS(cameraReactomeAnnotated, here("data/annotatedReactome.rds"))
 #saveRDS(cameraGoAnnotated, here("data/annotatedGO.rds"))
+
+#####Extraction of significant genes from GO list and figures for paper#####
+test <- readRDS(here("data/go_sig.data.rds"))
+dotplot(test[[1]], font.size = 14)+
+  ggtitle("Liver - Genotype effect")
+
+dotplot(test[[5]], font.size = 14)+
+  ggtitle("Liver vs Prim hep WT")
+dotplot(test[[8]], font.size = 14)+
+  ggtitle("Liver vs Prim hep HNKO")
+
+
+mito_genes <- test[[1]]@result
+View(mito_genes)
+gene_list <- mito_genes %>%
+  filter(Description == "cellular respiration"|Description =="NADH dehydrogenase complex assembly") %>%
+  dplyr::select(geneID)
+
+gene_list_unsplit <- c(unlist(str_split(gene_list[1,], "/")),unlist(str_split(gene_list[2,], "/")))
+
+gene_list_unique <- unique(gene_list_unsplit)
+cpm_key <-   clusterProfiler::bitr(
+  gene_list_unique,
+  fromType = "SYMBOL",
+  toType = "ENSEMBL",
+  OrgDb = "org.Mm.eg.db"
+)
+
+
+cpm_annotated <- as.data.frame(cpm_matrix)
+cpm_annotated <- cpm_annotated %>%
+  dplyr::filter(rownames(cpm_matrix) %in% cpm_key$ENSEMBL)
+
+columns <- colnames(cpm_annotated)
+column_order <- c("544L", "548L", "554L", "556L", "564L", "540L", "542L", "546L", "552L", "562L", "566L", "544CS", "548CS", "554CS", "556CS", "558CS", "564CS", "540CS", "542CS", "546CS", "552CS", "562CS", "566CS", "544PH", "548PH", "554PH", "556PH", "558PH", "564PH", "540PH", "542PH", "546PH", "552PH", "562PH",  "566PH")
+
+cpm_test <- cpm_annotated %>%
+  dplyr::select(column_order)
+
+conv <- clusterProfiler::bitr(rownames(cpm_test),
+                                            fromType = "ENSEMBL",
+                                            toType = "SYMBOL",
+                                            OrgDb = "org.Mm.eg.db")
+rownames(cpm_test) <- conv$SYMBOL
+#generate and organize metadata for heatmap
+meta_heat_map <- metadata %>%
+ dplyr::arrange(match(Sample, column_order)) %>%
+  dplyr::filter(!Sample == "558L") %>%
+  dplyr::select(Sample, Group)
+rownames(meta_heat_map)<-meta_heat_map$Sample
+meta_heat_map <- meta_heat_map %>%
+  dplyr::select(-Sample)
+
+
+pheatmap(cpm_test,
+         treeheight_col = 0,
+         treeheight_row = 0,
+         scale = "row",
+         legend = T,
+         na_col = "white",
+         Colv = NA,
+         na.rm = T,
+         cluster_cols = F,
+         fontsize_row = 8,
+         fontsize_col = 11,
+         cellwidth = 12,
+         cellheight = 7,
+         annotation_col = meta_heat_map
+)

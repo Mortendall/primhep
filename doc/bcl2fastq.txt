@@ -1,0 +1,1 @@
+nohup bcl2fastq --runfolder-dir ~/210312_A00642_0151_AH3F2FDRXY -r 2 -p 4 -w 2 --no-lane-splitting

@@ -1,0 +1,436 @@
+---
+title: "lesson"
+author: "MD"
+date: "24/3/2021"
+output: html_document
+---
+```{r}
+#####Data analysis with reactome####
+
+#' @param count_matrix 
+
+
+org.mm
+
+
+
+#### Gene Ontology (only BP)
+#' Title
+#'
+#' @param org.database ex Org.Mm.eg.db
+#' @param cpm_matrix a cpm matrix generated through edgeR's "cpm" function
+#' @param design_matrix design matrix generated thriough stats::model.matrix
+#' @param contrast_matrix contrast matrix generated with limma::makeContrasts
+#'
+#' @return a GO analysis
+
+camera_go <- function(org.database, cpm_matrix, design_matrix, contrast_matrix) {
+keysGO <- AnnotationDbi::keys(GO.db)
+termGO <- AnnotationDbi::select(GO.db, keys=keysGO, columns=c("TERM", "ONTOLOGY")) %>% data.table
+termGO <- termGO %>% 
+  dplyr::filter(ONTOLOGY == "BP") %>% 
+  dplyr::select(-ONTOLOGY)
+setnames(termGO, "GOID", "ID")
+
+cyt.go.genes <- as.list(org.Mm.eg.db::org.Mm.egGO2ALLEGS) 
+cyt.go.genes<- cyt.go.genes[names(cyt.go.genes) %in% termGO$ID]
+cyt.go.genes <- Filter(. %>% length %>% is_greater_than(4), cyt.go.genes) # Remove small categories
+cyt.go.genes <- Filter(. %>% length %>% is_less_than(501), cyt.go.genes) # Remove large categories
+
+entrez_matrix <- cpm_matrix
+conv <- bitr(rownames(entrez_matrix), fromType='ENSEMBL', toType='ENTREZID', OrgDb = org.database) %>%
+  data.table(key = "ENSEMBL")
+rownames(entrez_matrix) <- conv[rownames(entrez_matrix), ENTREZID, mult = "first"]
+
+GO_test <- apply(ctrsts, 2, camera, index = cyt.go.genes, y = entrez_matrix, design = design)
+GO_test <- lapply(GO_test, data.table, keep.rownames = T)
+GO_test <- lapply(GO_test, setnames, old = "rn", new = "ID")
+GO_test <- lapply(GO_test, extract, !is.na(PValue))
+GO_test <- lapply(GO_test, extract, termGO, on = "ID", nomatch = FALSE)
+GO_test <- lapply(GO_test, extract, order(PValue, decreasing = FALSE))
+return(GO_test)
+}
+
+#write.xlsx(camera_test, here::here("data/Reactome_data.xlsx"), asTable = TRUE)
+#write.xlsx(GO_test, here::here("data/GO_data.xlsx"), asTable = TRUE)
+
+#####GO-term extraction#####
+#code from Lars to extract genes
+annotateWithGenes <- function(tests, termList, fromType){
+  conv <- bitr(unique(unlist(termList)), fromType = fromType, toType = 'SYMBOL', OrgDb = "org.Hs.eg.db") %>%
+    data.table(key = fromType)
+  pasteSymbols <- function(x) conv[termList[[x]], paste0(SYMBOL, collapse = ", ")]
+  termSymbols <- lapply(names(termList), pasteSymbols) %>% data.table
+  termSymbols[, id:=names(termList)]
+  setnames(termSymbols, c("symbolList", "id"))
+  setkey(termSymbols, id)
+
+  tests <- lapply(tests, copy)
+  for (i in names(tests)){
+    tests[[i]][, genesInTerm:=termSymbols[ID, symbolList]]
+  }
+  tests
+}
+
+cameraGoAnnotated <- annotateWithGenes(GO_test, cyt.go.genes, fromType = 'ENTREZID')
+cameraReactomeAnnotated <- annotateWithGenes(camera_test, reactomeList, fromType = "ENSEMBL")
+```
+
+
+```{r}
+counts <- count_matrix_assembly("featurecounts_test.xlsx")
+
+metadata <- load_metadata("metadata.xlsx")
+
+
+#Quality_control_plots(counts, metadata)
+#QC reveals that 558L looks very odd. Remove and rerun. QCplots saved as QCplots_before_filtering
+metadata <- metadata %>% 
+  dplyr::filter(!Sample == "558L")
+counts <- counts %>% 
+  dplyr::select(- "558L")
+
+Quality_control_plots(counts, metadata)
+
+design <- Generate_design_matrix(metadata)
+
+ctrsts <- makeContrasts(
+  Liver = HNKO_L - WT_L,
+  Cell_susp = HNKO_CS - WT_CS,
+  Prim_hep = HNKO_PH - WT_PH,
+  Liv_vs_CS_WT = WT_L - WT_CS,
+  Liv_vs_PH_WT = WT_L - WT_PH,
+  CS_vs_PH_WT = WT_CS - WT_PH,
+  Liv_vs_CS_KO = HNKO_L - HNKO_CS,
+  Liv_vs_PH_KO = HNKO_L - HNKO_PH,
+  CS_vs_PH_KO = HNKO_CS - HNKO_PH,
+  levels = design)
+
+all(metadata$Sample == colnames(counts))
+
+dgeResults <- RNAseq_processing(counts, metadata, design, ctrsts)
+
+```
+
+```{r}
+
+group <- as.matrix(metadata$Group)
+  RNAseq <- edgeR::DGEList(counts = counts, group = group)
+  keep <- edgeR::filterByExpr(RNAseq, design = design, min.count = 20)
+  RNAseq <- RNAseq[keep, , keep.lib.sizes = F]
+  RNAseq <- edgeR::calcNormFactors(RNAseq)
+  cpm_matrix <- cpm(RNAseq, log = T)
+  key <- clusterProfiler::bitr(rownames(cpm_matrix), fromType = "ENSEMBL", toType = "SYMBOL", OrgDb = "org.Mm.eg.db")
+  RNAseq <- edgeR::estimateDisp(RNAseq,design)
+  efit <- edgeR::glmQLFit(RNAseq, design)
+  dgeResults <- apply(ctrsts, 2, . %>%
+                        edgeR::glmQLFTest(glmfit = efit, contrast = .) %>%
+                        edgeR::topTags(n = Inf, p.value = 1) %>%
+                        magrittr::extract2("table") %>%
+                        data.table::as.data.table(keep.rownames = TRUE))
+dgeResults_annotated <- dgeResults
+for (i in 1:length(dgeResults_annotated)){
+   data.table::setnames(dgeResults_annotated[[i]],names(dgeResults_annotated[[i]])[1], "ENSEMBL")
+  ens2symbol <-
+    clusterProfiler::bitr(dgeResults_annotated[[i]]$ENSEMBL,
+         fromType = 'ENSEMBL',
+         toType = 'SYMBOL',
+         OrgDb = "org.Mm.eg.db")
+  ens2symbol %<>% data.table %>% data.table::setkey(ENSEMBL)
+  dgeResults_annotated[[i]] <- dplyr::full_join(dgeResults_annotated[[i]], ens2symbol)
+}
+
+#write.xlsx(dgeResults_annotated, file = here("data/edgeR.xlsx"), asTable = TRUE)
+
+
+cpm_matrix_anno <- cpm_matrix
+cpm_matrix_anno <- as.data.frame(cpm_matrix_anno)
+cpm_matrix_anno <- cpm_matrix_anno %>% 
+  dplyr::mutate(ENSEMBL = rownames(cpm_matrix_anno))
+
+  ens2symbol <-
+    clusterProfiler::bitr(cpm_matrix_anno$ENSEMBL,
+         fromType = 'ENSEMBL',
+         toType = 'SYMBOL',
+         OrgDb = "org.Mm.eg.db")
+  ens2symbol %<>% data.table %>% data.table::setkey(ENSEMBL)
+ cpm_matrix_anno <- dplyr::full_join(cpm_matrix_anno, ens2symbol)
+#write.xlsx(cpm_matrix_anno, file = here("data/CPM_matrix.xlsx"), asTable = TRUE)
+```
+```{r}
+#####Generation of PCOA plots#####
+
+counts <- count_matrix_assembly("featurecounts_test.xlsx")
+
+metadata <- load_metadata("metadata.xlsx") 
+
+metadata <- metadata %>%
+  dplyr::filter(!Sample == "558L")
+counts <- counts %>%
+  dplyr::select(- "558L")
+group <- as.matrix(metadata$Group)
+
+RNAseq <- edgeR::DGEList(counts = counts, group = group)
+
+mdsData <- plotMDS(RNAseq, ndim = 3, plot = FALSE)
+  mdsData <-
+    mdsData$cmdscale.out %>% data.table(keep.rownames = TRUE) %>%
+    mutate(ID = rownames(RNAseq$samples)) %>%
+    dplyr::select(-rn) %>%
+    mutate(Group = metadata$Group)
+
+  setnames(mdsData,
+           c("V1", "V2", "V3", "ID", "Group"),
+           c("dim1", "dim2", "dim3", "ID", "Group"))
+ #plotMDS(RNAseq, ndim = 3)
+  pBase <-
+    ggplot(mdsData, aes(x = dim1, y = dim2, colour = Group)) +
+    geom_point(size = 10) +
+    #geom_label(show.legend = FALSE, size = 5) +
+    theme_bw()+
+    theme(axis.title.x = element_text(size = 18),
+          axis.title.y = element_text(size = 18),
+          legend.text = element_text(size = 18),
+          plot.title = element_text(size = 22, hjust = 0.5))+
+    ggtitle("MDS Plot")
+  
+  #repeat with viability grouping
+  
+  isolation_data <- openxlsx::read.xlsx(here::here("data_raw/isolation_notes.xlsx"))
+  
+  metadata_test <- metadata
+  metadata_test  <- metadata_test %>%
+    dplyr::mutate(X7 = str_extract(metadata_test$Sample, "^[0-9]{3}"))
+  metadata_test$X7 <- as.numeric(metadata_test$X7) 
+  metadata_test <- dplyr::left_join(metadata_test, isolation_data, by = c("X7" = "Mouse.ID"))
+  metadata_test <- metadata_test %>% 
+    dplyr::mutate(Viability_class = dplyr::case_when(
+      Viability < 0.5 ~ "Low",
+      Viability > 0.5 ~ "High"
+    ))
+
+  mdsData <- plotMDS(RNAseq, ndim = 3, plot = FALSE)
+  mdsData <-
+    mdsData$cmdscale.out %>% data.table(keep.rownames = TRUE) %>%
+    mutate(ID = rownames(RNAseq$samples)) %>%
+    dplyr::select(-rn) %>%
+    mutate(Group = metadata_test$Viability)
+ setnames(mdsData,
+           c("V1", "V2", "V3", "ID", "Group"),
+           c("dim1", "dim2", "dim3", "ID", "Viability"))
+  
+  pBase <-
+    ggplot(mdsData, aes(x = dim1, y = dim2, colour = Group)) +
+    geom_point(size = 10) +
+    #geom_label(show.legend = FALSE, size = 5) +
+    theme_bw()+
+    theme(axis.title.x = element_text(size = 18),
+          axis.title.y = element_text(size = 18),
+          legend.text = element_text(size = 18),
+          plot.title = element_text(size = 22, hjust = 0.5))+
+    ggtitle("MDS Plot")
+    
+```
+
+```{r}
+#####Upsetplot and heatmaps for relevant candidates #####
+
+#extract significant proteins from each test
+
+edgeR_data <- list(Liver = NA,
+                   Cell_susp = NA,
+                   Prim_hep = NA,
+                   Liv_vs_CS_WT = NA,
+                   Liv_vs_PH_WT = NA,
+                   CS_vs_PH_WT = NA,
+                   Liv_vs_CS_KO = NA,
+                   Liv_vs_PH_KO = NA,
+                   CS_vs_PH_KO = NA)
+  for (i in 1:9){
+    edgeR_data[[i]]<- openxlsx::read.xlsx(here("data/edgeR.xlsx"),sheet = i)
+  }
+
+
+sig_genes <- list("Liver" = NA,
+                  "Cell Suspension" = NA,
+                  "Primary Hepatocytes" = NA)
+for (i in 1:3){
+  sig_genes[[i]]<- edgeR_data[[i]]
+  sig_genes[[i]]<- sig_genes[[i]] %>% 
+    dplyr::filter(FDR < 0.05) 
+  sig_genes[[i]]<-sig_genes[[i]]$SYMBOL
+  }
+
+
+order_upset <- c("Liver", "Cell Suspension", "Primary Hepatocytes")
+
+upsetPlot <- UpSetR::upset(UpSetR::fromList(sig_genes),
+      sets = order_upset,
+      order.by = "freq", 
+      keep.order = T,
+      text.scale = 2
+      )
+upsetPlot 
+grid::grid.text("Main effect of Genotype", x=0.65, y = 0.95, gp=grid::gpar(fontsize = 30))
+  
+all_genes <- as.data.frame(sig_genes[[1]])  %>% 
+  dplyr::filter(sig_genes[[1]] %in% sig_genes[[2]]& sig_genes[[1]] %in% sig_genes[[3]])
+
+#Generate heatmap for candidates
+  
+cpm_key <-   clusterProfiler::bitr(
+  all_genes$`sig_genes[[1]]`,
+  fromType = "SYMBOL",
+  toType = "ENSEMBL",
+  OrgDb = "org.Mm.eg.db"
+)
+
+
+cpm_annotated <- as.data.frame(cpm_matrix)
+cpm_annotated <- cpm_annotated %>%
+  dplyr::filter(rownames(cpm_matrix) %in% cpm_key$ENSEMBL)
+
+columns <- colnames(cpm_annotated)
+column_order <- c("544L", "548L", "554L", "556L", "564L", "540L", "542L", "546L", "552L", "562L", "566L", "544CS", "548CS", "554CS", "556CS", "558CS", "564CS", "540CS", "542CS", "546CS", "552CS", "562CS", "566CS", "544PH", "548PH", "554PH", "556PH", "558PH", "564PH", "540PH", "542PH", "546PH", "552PH", "562PH",  "566PH")
+
+cpm_test <- cpm_annotated %>%
+  dplyr::select(column_order)
+
+conv <- clusterProfiler::bitr(rownames(cpm_test),
+                                            fromType = "ENSEMBL",
+                                            toType = "SYMBOL",
+                                            OrgDb = "org.Mm.eg.db")
+rownames(cpm_test) <- conv$SYMBOL
+#generate and organize metadata for heatmap
+meta_heat_map <- metadata %>%
+ dplyr::arrange(match(Sample, column_order)) %>%
+  dplyr::filter(!Sample == "558L") %>%
+  dplyr::select(Sample, Group)
+rownames(meta_heat_map)<-meta_heat_map$Sample
+meta_heat_map <- meta_heat_map %>%
+  dplyr::select(-Sample)
+
+
+pheatmap(cpm_test,
+         treeheight_col = 0,
+         treeheight_row = 0,
+         scale = "row",
+         legend = T,
+         na_col = "white",
+         Colv = NA,
+         na.rm = T,
+         cluster_cols = F,
+         fontsize_row = 8,
+         fontsize_col = 11,
+         cellwidth = 12,
+         cellheight = 7,
+         annotation_col = meta_heat_map
+)
+
+
+
+```
+```{r}
+#####Upset plot showing Liver vs prim hep across genotypes#####
+edgeR_data <- list(Liver = NA,
+                   Cell_susp = NA,
+                   Prim_hep = NA,
+                   Liv_vs_CS_WT = NA,
+                   Liv_vs_PH_WT = NA,
+                   CS_vs_PH_WT = NA,
+                   Liv_vs_CS_KO = NA,
+                   Liv_vs_PH_KO = NA,
+                   CS_vs_PH_KO = NA)
+  for (i in 1:9){
+    edgeR_data[[i]]<- openxlsx::read.xlsx(here("data/edgeR.xlsx"),sheet = i)
+  }
+
+
+sig_genes <- list("Liver vs Prim Hep WT" = NA,
+                  "Liver vs Prim Hep HNKO" = NA)
+
+  sig_genes[[1]]<- edgeR_data[[5]]
+  sig_genes[[1]]<- sig_genes[[1]] %>% 
+    dplyr::filter(FDR < 0.05) 
+  sig_genes[[1]]<-sig_genes[[1]]$SYMBOL
+  sig_genes[[2]]<- edgeR_data[[8]]
+  sig_genes[[2]]<- sig_genes[[2]] %>% 
+    dplyr::filter(FDR < 0.05) 
+  sig_genes[[2]]<-sig_genes[[2]]$SYMBOL
+
+
+order_upset <- c("Liver vs Prim Hep WT", "Liver vs Prim Hep HNKO")
+
+upsetPlot <- UpSetR::upset(UpSetR::fromList(sig_genes),
+      sets = order_upset,
+      order.by = "freq", 
+      keep.order = T,
+      text.scale = 2
+      )
+upsetPlot 
+grid::grid.text("Main effect of Genotype", x=0.65, y = 0.95, gp=grid::gpar(fontsize = 30))
+
+#Extract unique genes for WT and HNKO
+unique_genes <- list(Unique_WT = NA,
+                     Unique_HNKO = NA)
+
+unique_genes[[1]] <- as.data.frame(sig_genes[[1]])  %>% 
+  dplyr::filter(!sig_genes[[1]] %in% sig_genes[[2]])
+unique_genes[[2]] <- as.data.frame(sig_genes[[2]])  %>% 
+  dplyr::filter(!sig_genes[[2]] %in% sig_genes[[1]])
+universe_key <-  clusterProfiler::bitr(
+  rownames(cpm_matrix),
+  fromType = "ENSEMBL",
+  toType = "ENTREZID",
+  OrgDb = "org.Mm.eg.db"
+)
+unique_entrez <- list(WT_genes = unique_genes[[1]],
+                      HNKO_genes = unique_genes[[2]])
+
+unique_entrez[[1]] <-  clusterProfiler::bitr(
+  unique_entrez[[1]]$`sig_genes[[1]]`,
+  fromType = "SYMBOL",
+  toType = "ENTREZID",
+  OrgDb = "org.Mm.eg.db"
+)
+
+unique_entrez[[2]] <-  clusterProfiler::bitr(
+  unique_entrez[[2]]$`sig_genes[[2]]`,
+  fromType = "SYMBOL",
+  toType = "ENTREZID",
+  OrgDb = "org.Mm.eg.db"
+)
+
+GO_data <- list(WT_GO = NA,
+                HNKO_GO = NA)
+
+eg <- unique_entrez$WT_genes$ENTREZID
+
+  GO_data[[1]] <- clusterProfiler::enrichGO(gene = eg,
+                                           universe = universe_key$ENTREZID,
+                                           OrgDb = org.Mm.eg.db,
+                                           ont = "BP")
+  eg <- unique_entrez$HNKO_genes$ENTREZID
+
+  GO_data[[2]] <- clusterProfiler::enrichGO(gene = unique_entrez$HNKO_genes$ENTREZID,
+                                           universe = universe_key$ENTREZID,
+                                           OrgDb = org.Mm.eg.db,
+                                           ont = "BP")
+  
+    GO_data[[i]]<- goResults
+
+
+dotplot(GO_data[[1]])
+#No significant GO-terms among unique genes
+
+edgeR_data_HNKO_candidates <- edgeR_data$Liv_vs_PH_KO %>% 
+  dplyr::filter(SYMBOL %in% unique_entrez$HNKO_genes$SYMBOL) %>% 
+  dplyr::mutate(logP = -log(FDR))
+volcano <- ggplot2::ggplot(edgeR_data_HNKO_candidates, aes(x = logFC, y = logP))+
+  geom_point()+
+  ggtitle("Unique HNKO Liver vs PH genes")
+  
+
+
+```
+
