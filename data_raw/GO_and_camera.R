@@ -99,6 +99,7 @@ dotplot(test[[8]], font.size = 14)+
 
 mito_genes <- test[[1]]@result
 View(mito_genes)
+
 gene_list <- mito_genes %>%
   filter(Description == "cellular respiration"|Description =="NADH dehydrogenase complex assembly") %>%
   dplyr::select(geneID)
@@ -137,7 +138,7 @@ meta_heat_map <- metadata %>%
 rownames(meta_heat_map)<-meta_heat_map$Sample
 meta_heat_map <- meta_heat_map %>%
   dplyr::select(-Sample)
-
+meta_heat_map$Group <- factor(meta_heat_map$Group, levels = c("WT_L", "HNKO_L", "WT_CS", "HNKO_CS", "WT_PH", "HNKO_PH"))
 
 pheatmap(cpm_test,
          treeheight_col = 0,
