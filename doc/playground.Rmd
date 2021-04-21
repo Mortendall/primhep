@@ -268,7 +268,7 @@ upsetPlot <- UpSetR::upset(UpSetR::fromList(sig_genes),
       sets = order_upset,
       order.by = "freq", 
       keep.order = T,
-      text.scale = 2
+      text.scale = c(3, 2, 2, 1.2, 2, 3)
       )
 upsetPlot 
 grid::grid.text("Main effect of Genotype", x=0.65, y = 0.95, gp=grid::gpar(fontsize = 30))
@@ -365,10 +365,10 @@ upsetPlot <- UpSetR::upset(UpSetR::fromList(sig_genes),
       sets = order_upset,
       order.by = "freq", 
       keep.order = T,
-      text.scale = 2
+      text.scale = c(3, 2, 2, 1.2, 2, 3)
       )
 upsetPlot 
-grid::grid.text("Main effect of Genotype", x=0.65, y = 0.95, gp=grid::gpar(fontsize = 30))
+grid::grid.text("Liver vs Hepatocytes effect", x=0.7, y = 0.95, gp=grid::gpar(fontsize = 32))
 
 #Extract unique genes for WT and HNKO
 unique_genes <- list(Unique_WT = NA,

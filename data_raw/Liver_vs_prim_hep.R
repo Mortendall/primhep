@@ -1,7 +1,7 @@
 ####data import and trimming ####
 
 
-counts <- count_matrix_assembly("featurecounts_test.xlsx")
+counts <- count_matrix_assembly("count_matrix.xlsx")
 
 metadata <- load_metadata("metadata.xlsx")
 
