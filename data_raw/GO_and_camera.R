@@ -72,7 +72,7 @@ go_data <- camera_go(org.db, cpm_matrix = cpm_matrix, design_matrix = design, co
 
 
 ####GO on signficant genes####
-go_sig_genes <- goAnalysis(edgeR_data)
+go_sig_genes <- goAnalysis(edgeR_data, "BP")
 #printGOterms(go_data)
 
 for (i in 1:length(go_sig_genes)){
@@ -88,8 +88,19 @@ cameraReactomeAnnotated <- annotateWithGenes(reactome_data, reactomeList, fromTy
 
 #####Extraction of significant genes from GO list and figures for paper#####
 test <- readRDS(here("data/go_sig.data.rds"))
-dotplot(test[[1]], font.size = 14)+
+Liver <- dotplot(test[[1]], font.size = 14)+
   ggtitle("Liver - Genotype effect")
+
+tiff("LiverGO.tif", units = "cm", width = 25, height = 15, res = 300)
+Liver
+dev.off()
+
+PH <- dotplot(test[[3]], font.size = 14)+
+  ggtitle("Primary Hepatocyte - Genotype effect")
+
+tiff("PHGO.tif", units = "cm", width = 25, height = 15, res = 300)
+PH
+dev.off()
 
 dotplot(test[[5]], font.size = 14)+
   ggtitle("Liver vs Prim hep WT")
@@ -138,9 +149,19 @@ meta_heat_map <- metadata %>%
 rownames(meta_heat_map)<-meta_heat_map$Sample
 meta_heat_map <- meta_heat_map %>%
   dplyr::select(-Sample)
-meta_heat_map$Group <- factor(meta_heat_map$Group, levels = c("WT_L", "HNKO_L", "WT_CS", "HNKO_CS", "WT_PH", "HNKO_PH"))
+meta_heat_map <- meta_heat_map %>%
+  dplyr::mutate(Group = case_when(
+    Group == "WT_L"~"WT L",
+    Group =="WT_CS"~"WT CS",
+    Group == "WT_PH"~"WT PH",
+    Group =="HNKO_L"~"HNKO L",
+    Group =="HNKO_CS"~"HNKO CS",
+    Group =="HNKO_PH"~"HNKO PH"
+  ))
 
-pheatmap(cpm_test,
+meta_heat_map$Group <- factor(meta_heat_map$Group, levels = c("WT L", "HNKO L", "WT CS", "HNKO CS", "WT PH", "HNKO PH"))
+
+OxPhos <- pheatmap(cpm_test,
          treeheight_col = 0,
          treeheight_row = 0,
          scale = "row",
@@ -155,3 +176,35 @@ pheatmap(cpm_test,
          cellheight = 7,
          annotation_col = meta_heat_map
 )
+
+# tiff("Oxphos.tif", units = "cm", width = 25, height = 20, res = 300)
+# OxPhos
+# dev.off()
+
+#####Repeat analysis with MF####
+go_sig_genes_MF <- goAnalysis(edgeR_data, "MF")
+#printGOterms(go_data)
+
+for (i in 1:length(go_sig_genes_MF)){
+  go_sig_genes_MF[[i]] <- clusterProfiler::setReadable(go_sig_genes_MF[[i]], OrgDb = org.Mm.eg.db, keyType="ENTREZID")
+}
+#saveRDS(go_sig_genes_MF, file = here::here("data/go_sig_MF.data.rds"))
+test <- readRDS(here::here("data/go_sig_MF.data.rds"))
+Liver <- clusterProfiler::dotplot(test[[1]], font.size = 14)+
+  ggtitle("Liver - Genotype effect")
+#
+# tiff("LiverGO_MF.tif", units = "cm", width = 25, height = 15, res = 300)
+#  Liver
+#  dev.off()
+
+PH <- dotplot(test[[3]], font.size = 14)+
+  ggtitle("Primary Hepatocyte - Genotype effect")
+
+ # tiff("PHGO_MF.tif", units = "cm", width = 25, height = 15, res = 300)
+ # PH
+ # dev.off()
+
+dotplot(test[[5]], font.size = 14)+
+  ggtitle("Liver vs Prim hep WT")
+dotplot(test[[8]], font.size = 14)+
+  ggtitle("Liver vs Prim hep HNKO")

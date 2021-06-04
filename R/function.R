@@ -314,7 +314,7 @@ camera_go <- function(org.database, cpm_matrix, design_matrix, contrast_matrix) 
 #'
 #' @return a list containing enrichresults for each element in the results file list
 
-goAnalysis <- function(result_list){
+goAnalysis <- function(result_list, ontology){
   bg <- result_list[[1]]
   bg_list <- clusterProfiler::bitr(
     bg$SYMBOL,
@@ -339,7 +339,7 @@ goAnalysis <- function(result_list){
     goResults <- clusterProfiler::enrichGO(gene = eg$ENTREZID,
                                            universe = bg_list$ENTREZID,
                                            OrgDb = org.Mm.eg.db,
-                                           ont = "BP")
+                                           ont = ontology)
     goResult_list[[i]]<- goResults
   }
   for (i in 1:length(goResult_list)){
@@ -396,3 +396,5 @@ annotateWithGenes <- function(tests, termList, fromType){
   }
   tests
 }
+
+
