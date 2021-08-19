@@ -15,6 +15,8 @@ library(RColorBrewer)
 library(limma)
 library(GO.db)
 library(stringr)
+library(dplyr)
+library(ggplot2)
 
 #' count_matrix_loader
 #'
@@ -41,13 +43,13 @@ count_matrix_assembly <- function(file_type){
 #'
 #' @return metadata file sorted according to count matrix order
 
-load_metadata <- function(file_name) {
-  data_file <- fs::dir_ls(here::here("data_raw/"),
-                          regexp = file_name,
-                          recurse = T)
-  metadata <- openxlsx::read.xlsx(xlsxFile = data_file)
-  return(metadata)
-}
+ load_metadata <- function(file_name) {
+   data_file <- fs::dir_ls(here::here("data_raw/"),
+                           regexp = file_name,
+                           recurse = T)
+   metadata <- openxlsx::read.xlsx(xlsxFile = data_file)
+   return(metadata)
+ }
 
 #' Quality control generator
 #'

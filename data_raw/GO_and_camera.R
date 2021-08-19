@@ -72,7 +72,7 @@ go_data <- camera_go(org.db, cpm_matrix = cpm_matrix, design_matrix = design, co
 
 
 ####GO on signficant genes####
-go_sig_genes <- goAnalysis(edgeR_data, "BP")
+go_sig_genes <- goAnalysis(edgeR_data, "MF")
 #printGOterms(go_data)
 
 for (i in 1:length(go_sig_genes)){
@@ -203,6 +203,34 @@ PH <- dotplot(test[[3]], font.size = 14)+
  # tiff("PHGO_MF.tif", units = "cm", width = 25, height = 15, res = 300)
  # PH
  # dev.off()
+
+dotplot(test[[5]], font.size = 14)+
+  ggtitle("Liver vs Prim hep WT")
+dotplot(test[[8]], font.size = 14)+
+  ggtitle("Liver vs Prim hep HNKO")
+
+#####Repeat analysis with CC####
+go_sig_genes_CC <- goAnalysis(edgeR_data, "CC")
+#printGOterms(go_data)
+
+for (i in 1:length(go_sig_genes_CC)){
+  go_sig_genes_CC[[i]] <- clusterProfiler::setReadable(go_sig_genes_CC[[i]], OrgDb = org.Mm.eg.db, keyType="ENTREZID")
+}
+saveRDS(go_sig_genes_CC, file = here::here("data/go_sig_CC.data.rds"))
+test <- readRDS(here::here("data/go_sig_CC.data.rds"))
+Liver <- clusterProfiler::dotplot(test[[1]], font.size = 14)+
+  ggtitle("Liver - Genotype effect")
+#
+ tiff("LiverGO_CC.tif", units = "cm", width = 25, height = 15, res = 300)
+  Liver
+  dev.off()
+
+PH <- dotplot(test[[3]], font.size = 14)+
+  ggtitle("Primary Hepatocyte - Genotype effect")
+
+ tiff("PHGO_CC.tif", units = "cm", width = 25, height = 15, res = 300)
+ PH
+ dev.off()
 
 dotplot(test[[5]], font.size = 14)+
   ggtitle("Liver vs Prim hep WT")
