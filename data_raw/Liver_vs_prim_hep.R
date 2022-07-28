@@ -34,7 +34,7 @@ all(metadata$Sample == colnames(counts))
 #DGE analysis
 group <- as.matrix(metadata$Group)
 RNAseq <- edgeR::DGEList(counts = counts, group = group)
-keep <- edgeR::filterByExpr(RNAseq, design = design, min.count = 20)
+keep <- edgeR::filterByExpr(RNAseq, design = design)
 RNAseq <- RNAseq[keep, , keep.lib.sizes = F]
 RNAseq <- edgeR::calcNormFactors(RNAseq)
 counts_norm <- RNAseq$counts
@@ -77,3 +77,38 @@ ens2symbol %<>% data.table %>% data.table::setkey(ENSEMBL)
 cpm_matrix_anno <- dplyr::full_join(cpm_matrix_anno, ens2symbol)
 #write.xlsx(cpm_matrix_anno, file = here("data/CPM_matrix.xlsx"), asTable = TRUE)
 
+#####MDS code for WT only####
+meta_WT <- metadata |>
+  dplyr::filter(Genotype=="WT")
+cpm_matrix_WT <- counts|>
+  dplyr::select(meta_WT$Sample)
+group <- as.matrix(meta_WT$Group)
+all(meta_WT$Sample==colnames(cpm_matrix_WT))
+RNAseq <- edgeR::DGEList(counts = cpm_matrix_WT, group = group)
+
+mdsData <- plotMDS(RNAseq, plot = FALSE)
+mdsData <-
+  mdsData$eigen.vectors %>% as.data.table() %>%
+  dplyr::mutate(ID = rownames(RNAseq$samples)) %>%
+  dplyr::mutate(Group = meta_WT$Group) %>%
+  dplyr::select(ID, Group, V1, V2, V3)
+
+
+setnames(mdsData,
+         c("V1", "V2", "V3", "ID", "Group"),
+         c("dim1", "dim2", "dim3", "ID", "Group"))
+
+pBase <-
+  ggplot(mdsData, aes(x = dim1, y = dim2, colour = Group)) +
+  geom_point(size = 10) +
+  #geom_label(show.legend = FALSE, size = 5) +
+  theme_bw()+
+  theme(axis.title.x = element_text(size = 18),
+        axis.title.y = element_text(size = 18),
+        legend.text = element_text(size = 18),
+        plot.title = element_text(size = 22, hjust = 0.5))+
+  ggtitle("MDS Plot")
+
+# tiff("MDSplot_WT.tif", units = "cm", width = 20, height = 20, res = 300)
+# pBase
+# dev.off()

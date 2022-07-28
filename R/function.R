@@ -17,6 +17,7 @@ library(GO.db)
 library(stringr)
 library(dplyr)
 library(ggplot2)
+library(ComplexUpset)
 
 #' count_matrix_loader
 #'
@@ -316,7 +317,7 @@ camera_go <- function(org.database, cpm_matrix, design_matrix, contrast_matrix) 
 #'
 #' @return a list containing enrichresults for each element in the results file list
 
-goAnalysis <- function(result_list, ontology){
+goAnalysis <- function(result_list, ontology, direction){
   bg <- result_list[[1]]
   bg_list <- clusterProfiler::bitr(
     bg$SYMBOL,
@@ -327,23 +328,70 @@ goAnalysis <- function(result_list, ontology){
   )
 
   goResult_list <- vector(mode = "list", length = length(result_list))
-  for(i in 1:length(result_list)){
-    sig_list<- result_list[[i]] %>%
-      dplyr::filter(FDR<0.05)
+  if (direction == "Upregulated"){
+    print("Running analysis on upregulated genes")
+    for(i in 1:length(result_list)){
+      sig_list<- result_list[[i]] %>%
+        dplyr::filter(FDR<0.05) |>
+        dplyr::filter(logFC>0)
+      eg <- clusterProfiler::bitr(
+        sig_list$SYMBOL,
+        fromType = "SYMBOL",
+        toType = "ENTREZID",
+        OrgDb = "org.Mm.eg.db",
+        drop = T
+      )
+      goResults <- clusterProfiler::enrichGO(gene = eg$ENTREZID,
+                                             universe = bg_list$ENTREZID,
+                                             OrgDb = org.Mm.eg.db,
+                                             ont = ontology)
+      goResult_list[[i]]<- goResults
+    }
 
-    eg <- clusterProfiler::bitr(
-      sig_list$SYMBOL,
-      fromType = "SYMBOL",
-      toType = "ENTREZID",
-      OrgDb = "org.Mm.eg.db",
-      drop = T
-    )
-    goResults <- clusterProfiler::enrichGO(gene = eg$ENTREZID,
-                                           universe = bg_list$ENTREZID,
-                                           OrgDb = org.Mm.eg.db,
-                                           ont = ontology)
-    goResult_list[[i]]<- goResults
+
   }
+
+  if(direction == "Downregulated"){
+    print("Running analysis on downregulated genes")
+    for(i in 1:length(result_list)){
+      sig_list<- result_list[[i]] %>%
+        dplyr::filter(FDR<0.05) |>
+        dplyr::filter(logFC<0)
+      eg <- clusterProfiler::bitr(
+        sig_list$SYMBOL,
+        fromType = "SYMBOL",
+        toType = "ENTREZID",
+        OrgDb = "org.Mm.eg.db",
+        drop = T
+      )
+      goResults <- clusterProfiler::enrichGO(gene = eg$ENTREZID,
+                                             universe = bg_list$ENTREZID,
+                                             OrgDb = org.Mm.eg.db,
+                                             ont = ontology)
+      goResult_list[[i]]<- goResults
+    }
+
+  }
+  if (direction == ""){
+    for(i in 1:length(result_list)){
+      sig_list<- result_list[[i]] %>%
+        dplyr::filter(FDR<0.05)
+      eg <- clusterProfiler::bitr(
+        sig_list$SYMBOL,
+        fromType = "SYMBOL",
+        toType = "ENTREZID",
+        OrgDb = "org.Mm.eg.db",
+        drop = T
+      )
+      goResults <- clusterProfiler::enrichGO(gene = eg$ENTREZID,
+                                             universe = bg_list$ENTREZID,
+                                             OrgDb = org.Mm.eg.db,
+                                             ont = ontology)
+      goResult_list[[i]]<- goResults
+    }
+  }
+
+
   for (i in 1:length(goResult_list)){
     names(goResult_list)[i]<-names(result_list)[i]
   }
@@ -351,23 +399,24 @@ goAnalysis <- function(result_list, ontology){
 
 }
 
+
 #' File exporter - exports GOresults as an excel sheet, and prints dotplot and cnet plots
 #'
 #' @param goList a list object containing one or more enrichResults
 #'
 #' @return
 
-printGOterms <- function(goList){
+printGOterms <- function(goList, fileName){
   goSheets<- vector(mode = "list", length = length(goList))
   for (i in 1:length(goSheets)){
     goSheets[[i]] <- goList[[i]]@result
     names(goSheets)[i]<-names(goList)[i]
   }
-  openxlsx::write.xlsx(goSheets, file = here("data/NASH_NAFLD_GOterms.xlsx"), asTable = TRUE)
+  openxlsx::write.xlsx(goSheets, file = paste(here::here("data"),"/",fileName,".xlsx",sep = ""), asTable = TRUE)
 
   for (i in 1:length(goList)){
     dotplot <- enrichplot::dotplot(goList[[i]], title = names(goList)[i])
-    ggplot2::ggsave(dotplot, filename = paste(here("data/figures"),"/dotplot_",names(goList[i]),".png", sep = ""),width = 12, height = 12, units = "cm", scale = 2.5)
+    ggplot2::ggsave(dotplot, filename = paste(here::here("data/figures"),"/dotplot_",names(goList[i]),".png", sep = ""),width = 12, height = 12, units = "cm", scale = 2.5)
     goList_anno <- clusterProfiler::setReadable(goList[[i]], OrgDb = org.Mm.eg.db, keyType="ENTREZID")
     cnetplot <- enrichplot::cnetplot(goList_anno, title = names(goList)[i], size = 1)
     ggplot2::ggsave(cnetplot, filename = paste(here("data/figures"),"/cnetplot_",names(goList[i]),".png", sep = ""),scale = 2.5)
@@ -399,4 +448,140 @@ annotateWithGenes <- function(tests, termList, fromType){
   tests
 }
 
+#' reactomeAnalysis
+#'
+#' @param result_list
+#' @param direction
+#'
+#' @return
+#' @export
+#'
+#' @examples
+reactomeAnalysis <- function(result_list, direction){
+  bg <- result_list[[1]]
+  bg_list <- clusterProfiler::bitr(
+    bg$SYMBOL,
+    fromType = "SYMBOL",
+    toType = "ENTREZID",
+    OrgDb = "org.Mm.eg.db",
+    drop = T
+  )
+  reactomeResult_list <- vector(mode = "list", length = length(result_list))
+  sig_list <- vector(mode = "list", length = length(result_list))
+  if (direction == "Upregulated"){
+    for(i in 1:length(result_list)){
+      sig_list[[i]]<- result_list[[i]] %>%
+        dplyr::filter(FDR<0.05) |>
+        dplyr::filter(logFC>0)
+    }
+
+  }
+
+  if(direction == "Downregulated"){
+    for(i in 1:length(result_list)){
+      sig_list[[i]]<- result_list[[i]] %>%
+        dplyr::filter(FDR<0.05) |>
+        dplyr::filter(logFC<0)
+    }
+
+  }
+  else{for(i in 1:length(result_list)){
+    sig_list[[i]]<- result_list[[i]] %>%
+      dplyr::filter(FDR<0.05)
+  }
+
+  }
+  for(i in 1:length(result_list)){
+    eg <- clusterProfiler::bitr(
+      sig_list[[i]]$SYMBOL,
+      fromType = "SYMBOL",
+      toType = "ENTREZID",
+      OrgDb = "org.Mm.eg.db",
+      drop = T
+    )
+    reactomeResults <- ReactomePA::enrichPathway(gene = eg$ENTREZID,
+                                                 universe = bg_list$ENTREZID,
+                                                 organism ="mouse",
+                                                 readable = T)
+    reactomeResult_list[[i]]<- reactomeResults
+  }
+
+  for (i in 1:length(reactomeResult_list)){
+    names(reactomeResult_list)[i]<-names(result_list)[i]
+  }
+  return(reactomeResult_list)
+
+}
+
+#' Heatmap Generator clustered
+#'
+#' @param input_genes list of genes selected from enrichresult
+#' @param cpm_matrix count matrix
+#' @param setup metadta
+#' @param heatmap_title title for heatmap
+#'
+#'
+
+heatmap_generator_clustered <- function(input_genes, cpm_matrix, setup, heatmap_title){
+  #Generate Gene list
+  if(length(input_genes==1)){
+    gene_list <- input_genes
+  gene_list <- unlist(str_split(gene_list, "/"))
+  }
+  else{
+    gene_list <- input_genes
+  }
+
+  #Select Candidates in Gene List
+  trimmed_cpm <- cpm_matrix |>
+    dplyr::filter(SYMBOL %in% gene_list) |>
+    dplyr::distinct(SYMBOL, .keep_all = T)
+  trimmed_cpm <- trimmed_cpm |>
+    dplyr::filter(!is.na(SYMBOL))
+  rownames(trimmed_cpm)<-trimmed_cpm$SYMBOL
+  trimmed_cpm <- trimmed_cpm |>
+    dplyr::select(-SYMBOL)
+
+  #Order metadata
+
+  order <- c("Con_0", "Con_4", "Con_8", "Con_12", "Con_16", "Con_20",
+             "Low_0", "Low_4", "Low_8", "Low_12", "Low_16", "Low_20",
+             "High_0", "High_4", "High_8", "High_12", "High_16", "High_20")
+  setup_ordered <- setup%>%
+    dplyr::arrange(desc(Condition1),desc(Condition2))
+
+  #arrange data based on setup sheet
+  trimmed_cpm <- trimmed_cpm |>
+    dplyr::select(setup_ordered$Sample)
+
+  #create annotation key for heatmap
+  key <- as.data.frame(setup_ordered)
+  key <- key |>
+    dplyr::select(Group)
+  rownames(key) <- setup_ordered$ID
+  key$Group <-factor(key$Group, c("Con_0", "Con_4", "Con_8", "Con_12", "Con_16", "Con_20",
+                                  "Low_0", "Low_4", "Low_8", "Low_12", "Low_16", "Low_20",
+                                  "High_0", "High_4", "High_8", "High_12", "High_16", "High_20"))
+
+  #create heatmap
+  Heatmap <- pheatmap::pheatmap(trimmed_cpm,
+                                treeheight_col = 0,
+                                treeheight_row = 0,
+                                scale = "row",
+                                legend = T,
+                                na_col = "white",
+                                Colv = NA,
+                                na.rm = T,
+                                cluster_cols = F,
+                                fontsize_row = 5,
+                                fontsize_col = 8,
+                                cellwidth = 7,
+                                cellheight = 5,
+                                annotation_col = key,
+                                show_colnames = F,
+                                show_rownames = T,
+                                main = heatmap_title
+  )
+
+}
 
